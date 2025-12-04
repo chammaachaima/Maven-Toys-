@@ -1,0 +1,1 @@
+This project analyzes Maven Toys data to uncover sales trends, product performance, and inventory insights. It includes data cleaning in PostgreSQL, a Snowflake schema, and Power BI dashboards. Files: SQL scripts, LaTeX report, visualizations, and datasets.

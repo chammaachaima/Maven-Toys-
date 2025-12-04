@@ -1,0 +1,198 @@
+-- Drop dependent objects first
+DROP MATERIALIZED VIEW IF EXISTS monthly_sales_by_store;
+DROP TABLE IF EXISTS sales_mart;
+DROP TABLE IF EXISTS store_performance;
+
+-- Drop existing tables (if they exist)
+DROP TABLE IF EXISTS sales;
+DROP TABLE IF EXISTS inventory;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS stores;
+
+-- Create stores table
+CREATE TABLE stores (
+    Store_ID INT PRIMARY KEY,
+    Store_Name VARCHAR(70) NOT NULL,
+    Store_City VARCHAR(50) NOT NULL,
+    Store_Location VARCHAR(50),
+    Store_Open_Date DATE
+);
+
+-- Create products table
+CREATE TABLE products (
+    Product_ID INT PRIMARY KEY,
+    Product_Name VARCHAR(50) NOT NULL,
+    Product_Category VARCHAR(50) NOT NULL,
+    Product_Cost NUMERIC(10, 2) NOT NULL,
+    Product_Price NUMERIC(10, 2) NOT NULL
+);
+
+-- Create inventory table
+CREATE TABLE inventory (
+    Store_ID INT,
+    Product_ID INT,
+    Stock_On_Hand INT NOT NULL,
+    PRIMARY KEY (Store_ID, Product_ID),
+    FOREIGN KEY (Store_ID) REFERENCES stores(Store_ID),
+    FOREIGN KEY (Product_ID) REFERENCES products(Product_ID)
+);
+
+-- Create sales table
+CREATE TABLE sales (
+    Sale_ID INT PRIMARY KEY,
+    Store_ID INT,
+    Product_ID INT,
+    Sale_Date DATE NOT NULL,
+    Quantity_Sold INT NOT NULL,
+    FOREIGN KEY (Store_ID) REFERENCES stores(Store_ID),
+    FOREIGN KEY (Product_ID) REFERENCES products(Product_ID)
+);
+
+-- Load data into stores table
+COPY stores (Store_ID, Store_Name, Store_City, Store_Location, Store_Open_Date)
+FROM 'C:/Users/Dell/Downloads/Maven+Toysrawdata/Maven Toys Data/stores.csv'
+WITH CSV HEADER;
+
+-- Load data into products table
+COPY products (Product_ID, Product_Name, Product_Category, Product_Cost, Product_Price)
+FROM 'C:/Users/Dell/Downloads/Maven+Toysrawdata/Maven Toys Data/products.csv'
+WITH CSV HEADER;
+
+-- Load data into inventory table
+COPY inventory (Store_ID, Product_ID, Stock_On_Hand)
+FROM 'C:/Users/Dell/Downloads/Maven+Toysrawdata/Maven Toys Data/inventory.csv'
+WITH CSV HEADER;
+
+-- Load data into sales table
+COPY sales (Sale_ID, Store_ID, Product_ID, Sale_Date, Quantity_Sold)
+FROM 'C:/Users/Dell/Downloads/Maven+Toysrawdata/Maven Toys Data/sales.csv'
+WITH CSV HEADER;
+
+-- Check for missing values in the stores table
+SELECT *
+FROM stores
+WHERE store_id IS NULL OR store_name IS NULL OR store_city IS NULL;
+
+-- Check for missing values in the products table
+SELECT *
+FROM products
+WHERE product_id IS NULL OR product_name IS NULL OR product_category IS NULL;
+
+-- Check for missing values in the inventory table
+SELECT *
+FROM inventory
+WHERE store_id IS NULL OR product_id IS NULL OR stock_on_hand IS NULL;
+
+-- Check for missing values in the sales table
+SELECT *
+FROM sales
+WHERE sale_id IS NULL OR store_id IS NULL OR product_id IS NULL OR sale_date IS NULL OR quantity_sold IS NULL;
+
+-- Check for duplicate rows in the stores table
+SELECT store_id, COUNT(*)
+FROM stores
+GROUP BY store_id
+HAVING COUNT(*) > 1;
+
+-- Check for duplicate rows in the products table
+SELECT product_id, COUNT(*)
+FROM products
+GROUP BY product_id
+HAVING COUNT(*) > 1;
+
+-- Check for duplicate rows in the inventory table
+SELECT store_id, product_id, COUNT(*)
+FROM inventory
+GROUP BY store_id, product_id
+HAVING COUNT(*) > 1;
+
+-- Check for duplicate rows in the sales table
+SELECT sale_id, COUNT(*)
+FROM sales
+GROUP BY sale_id
+HAVING COUNT(*) > 1;
+
+-- Check for invalid data types in the stores table (store_id should be integer)
+SELECT *
+FROM stores
+WHERE store_id::text !~ '^\d+$';
+
+-- Check for invalid data types in the products table (product_id should be integer)
+SELECT *
+FROM products
+WHERE product_id::text !~ '^\d+$';
+
+-- Check for invalid data types in the inventory table (store_id and product_id should be integer)
+SELECT *
+FROM inventory
+WHERE store_id::text !~ '^\d+$' OR product_id::text !~ '^\d+$';
+
+-- Check for invalid data types in the sales table (store_id and product_id should be integer)
+SELECT *
+FROM sales
+WHERE store_id::text !~ '^\d+$' OR product_id::text !~ '^\d+$';
+
+-- Create a sales data mart with joined tables
+CREATE TABLE sales_mart AS
+SELECT s.sale_id, s.store_id, s.product_id, s.sale_date, s.quantity_sold,
+       st.store_name, st.store_city, p.product_name, p.product_category
+FROM sales s
+JOIN stores st ON s.store_id = st.store_id
+JOIN products p ON s.product_id = p.product_id;
+
+-- Create a materialized view for monthly sales by store
+CREATE MATERIALIZED VIEW monthly_sales_by_store AS
+SELECT DATE_TRUNC('month', sale_date) AS sale_month, store_id, SUM(quantity_sold) AS total_sales
+FROM sales
+GROUP BY sale_month, store_id;
+
+-- Create a store performance data mart
+CREATE TABLE store_performance AS
+SELECT st.store_id, st.store_name, st.store_city,
+       SUM(s.quantity_sold) AS total_sales,
+       SUM(s.quantity_sold * p.product_price) AS total_revenue
+FROM sales s
+JOIN stores st ON s.store_id = st.store_id
+JOIN products p ON s.product_id = p.product_id
+GROUP BY st.store_id, st.store_name, st.store_city;
+
+-- Check if the user 'eLaamarco' already exists in PostgreSQL
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_user WHERE usename = 'eLaamarco') THEN
+        CREATE USER eLaamarco WITH PASSWORD 'Elma29++';
+    END IF;
+END $$;
+
+-- Grant permissions to the user
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO eLaamarco;
+GRANT CONNECT ON DATABASE projectbi_dwh TO eLaamarco;
+GRANT USAGE ON SCHEMA public TO eLaamarco;
+
+-- Optimize Queries with Indexes
+CREATE INDEX idx_sales_store_id ON sales(store_id);
+CREATE INDEX idx_sales_product_id ON sales(product_id);
+CREATE INDEX idx_sales_sale_date ON sales(sale_date);
+
+-- ROLAP Queries
+-- Total Sales by Store
+SELECT store_name, SUM(quantity_sold) AS total_sales
+FROM sales_mart
+GROUP BY store_name;
+
+-- Monthly Sales Trend
+SELECT sale_month, SUM(total_sales) AS total_sales
+FROM monthly_sales_by_store
+GROUP BY sale_month;
+
+-- Top-Selling Products
+SELECT product_name, SUM(quantity_sold) AS total_sales
+FROM sales_mart
+GROUP BY product_name
+ORDER BY total_sales DESC
+LIMIT 10;
+
+-- Revenue by Store
+SELECT store_name, SUM(total_revenue) AS total_revenue
+FROM store_performance
+GROUP BY store_name;
